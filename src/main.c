@@ -14,6 +14,7 @@
 #include <zephyr/drivers/gpio.h>
 #include "my_pbm.h"
 #include "my_pbm_service_table.h"
+#include "hardware.h"
 
 
 static const struct bt_le_adv_param *adv_param = BT_LE_ADV_PARAM(
@@ -36,11 +37,9 @@ LOG_MODULE_REGISTER(Lesson4_Exercise2, LOG_LEVEL_DBG);
 #define STACKSIZE 1024
 #define PRIORITY 7
 
-#define RUN_LED_BLINK_INTERVAL 500
-#define NOTIFY_INTERVAL 500
-#define MEASURE_PIN 3 // gpio used for adc timer verification
-extern const struct device *gpio_dev;
-extern const struct device *gpio1_dev;
+#define RUN_LED_BLINK_INTERVAL 100
+//#define NOTIFY_INTERVAL 500
+
 
 void toggle_led2(void);
 void toggle_led1(void);
@@ -80,7 +79,7 @@ static void advertising_start(void)
 	k_work_submit(&adv_work);
 }
 
-/* STEP 16 - Define a function to simulate the data */
+/* STEP 16 - Define a function to simulate the data 
 static void simulate_data(void)
 {
 	app_sensor_value++;
@@ -88,34 +87,29 @@ static void simulate_data(void)
 		app_sensor_value = 100;
 	}
 }
-static void app_led_cb(bool led_state)
-{
-	dk_set_led(USER_LED, led_state);
-}
+	*/
 
-static bool app_button_cb(void)
-{
-	return app_button_state;
-}
 
-/* STEP 18.1 - Define the thread function  */
+/* STEP 18.1 - Define the thread function  
 void send_data_thread(void)
 {
 	while (1) {
-		/* Simulate data */
+		/* Simulate data 
 		simulate_data();
-		/* Send notification, the function sends notifications only if a client is subscribed */
+		/* Send notification, the function sends notifications only if a client is subscribed 
 		//my_pbm_send_sensor_notify(app_sensor_value);
 
 		k_sleep(K_MSEC(NOTIFY_INTERVAL));
 	}
 }
+*/
 
 /*static struct my_pbm_cb app_callbacks = {
 	.led_cb = app_led_cb,
 	.button_cb = app_button_cb,
 };
 */
+/*
 static void button_changed(uint32_t button_state, uint32_t has_changed)
 {
 	if (has_changed & USER_BUTTON) {
@@ -125,6 +119,7 @@ static void button_changed(uint32_t button_state, uint32_t has_changed)
 		// No streaming control here - that's done via BLE commands
 	}
 }
+	*/
 static void on_connected(struct bt_conn *conn, uint8_t err)
 {
 	if (err) {
@@ -149,7 +144,6 @@ static void on_connected(struct bt_conn *conn, uint8_t err)
 	printk("2. Write [0x00, 0x11, 0x00...] to COMMAND characteristic to START streaming\n");
 	printk("3. Write [0x00, 0x12, 0x00...] to COMMAND characteristic to STOP streaming\n");
 
-	dk_set_led_on(CON_STATUS_LED);
 	is_ble_connected = true;
 	set_led1(false); // Turn off LED0 (P1.08) blinking
 	set_led2(true); // Turn on LED1 (P0.24) when connected
@@ -172,38 +166,15 @@ struct bt_conn_cb connection_callbacks = {
 	.disconnected = on_disconnected,
 };
 
-static int init_button(void)
-{
-	int err;
-
-	err = dk_buttons_init(button_changed);
-	if (err) {
-		printk("Cannot init buttons (err: %d)\n", err);
-	}
-
-	return err;
-}
-
 
 
 int main(void)
 {
-	int blink_status = 0;
+	//int blink_status = 0;
 	int err;
 
 	LOG_INF("Starting Lesson 4 - Exercise 2 \n");
 
-	err = dk_leds_init();
-	if (err) {
-		LOG_ERR("LEDs init failed (err %d)\n", err);
-		return -1;
-	}
-
-	err = init_button();
-	if (err) {
-		printk("Button init failed (err %d)\n", err);
-		return -1;
-	}
 
 	err = bt_enable(NULL);
 	if (err) {
@@ -212,6 +183,11 @@ int main(void)
 	}
 	bt_conn_cb_register(&connection_callbacks);
 
+	err = hw_init_all();
+	if (err) {
+		LOG_ERR("Hardware init failed (err %d)\n", err);
+		return -1;
+	}
 	err = my_pbm_init();
 	if (err) {
 		printk("Failed to init LBS (err:%d)\n", err);
@@ -223,12 +199,11 @@ int main(void)
 	
 	// Main loop - blink system status LED and handle LED0 for advertising
 	for (;;) {
-		dk_set_led(RUN_STATUS_LED, (++blink_status) % 2);
 		
 		// Handle LED0 blinking for advertising (when not connected)
 		if (!is_ble_connected) {
 			static int adv_blink_counter = 0;
-			set_led1((++adv_blink_counter) % 2); // Blink LED0 (P1.08) for advertising
+			set_led1((++adv_blink_counter) % 2); // Blink LED1 for advertising
 		}
 		
 		k_sleep(K_MSEC(RUN_LED_BLINK_INTERVAL));

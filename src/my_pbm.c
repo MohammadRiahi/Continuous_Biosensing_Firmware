@@ -21,14 +21,10 @@
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/bluetooth/gatt.h>
-#include <zephyr/drivers/adc.h>
-#include <zephyr/device.h>
-#include <zephyr/drivers/gpio.h>
-#include <C:\ncs\v2.6.1\modules\hal\nordic\nrfx\hal\nrf_saadc.h>
-//#include <C:\ncs\v3.0.2\zephyr\include\zephyr\dt-bindings\adc\nrf-saadc-v3.h>
 
 #include "my_pbm.h"
 #include "my_pbm_service_table.h"
+#include "hardware.h"
 //-----------------------------Threads------------------------------------------------
 #define ADC_THREAD_STACK_SIZE 1024
 #define BLE_THREAD_STACK_SIZE 1024
@@ -50,16 +46,7 @@ void adc_thread(void *p1, void *p2, void *p3);
 void ble_thread(void *p1, void *p2, void *p3);
 
 //-----------------------------Constants----------------------------------------------
-// ADC and data packet configuration
-#define ADC_RESOLUTION 12
-#define ADC_ACQUISITION_TIME ADC_ACQ_TIME_DEFAULT // you can change the acquisition time for higher accuracy
-#define SENSOR_PIN 0  // ADC channel to use (P0.04 -> AIN2)
-#define SENSOR_PIN_1 1  // Second ADC channel to use (P0.31 -> AIN7)
-#define MEASURE_PIN 3 // gpio used for adc timer verification p0.03 
-#define LED1_PIN 8    // LED1 on P1.08
-#define LED2_PIN 24   // LED2 on P0.24
-const struct device *gpio_dev;
-const struct device *gpio1_dev;
+// Data packet configuration (ADC config now in hardware.c)
 
 //Buffering 
 #define DATAPACKET_SIZE 244
@@ -119,17 +106,8 @@ static void   adc_timer_handler(struct k_timer *timer);
 static void   packet_work_handler(uint8_t *packet);
 static void   prepare_packet_header(uint8_t* packet);
 static uint64_t get_timestamp(void);
-static void adc_setup(uint8_t channel);
-static uint16_t read_adc_averaged(uint8_t n);
 //-----------------------------Functions----------------------------------------------
 LOG_MODULE_DECLARE(Lesson4_Exercise2);
-
-// Simple ADC read function (placeholder until ADC is properly configured)
-
-static const struct device *adc_dev = DEVICE_DT_GET(DT_NODELABEL(adc));
-static int16_t adc_sample_buffer;
-//static struct adc_channel_cfg channel_cfg;
-static struct adc_sequence sequence;
 
 // -----------------Service functions and handlers ---------------------
 
@@ -407,7 +385,6 @@ static ssize_t read_commands(struct bt_conn *conn, const struct bt_gatt_attr *at
 //----------------Ring Buffer Management Functions--------------------
 static inline bool ring_buffer_put(uint16_t sample)
 {
-	gpio_pin_toggle(gpio_dev, MEASURE_PIN); // Start measurement timing
 	uint32_t next_write  = (ring_write_idx + 1) & RING_MASK;	
 	if (next_write == ring_read_idx) {
 		// Buffer is full
@@ -442,24 +419,7 @@ static void ring_buffer_reset(void){
 	ring_read_idx = 0;
 }
 
-static uint16_t read_adc_single(void){
-	if (adc_read(adc_dev, &sequence) == 0) {
-		return adc_sample_buffer;
-	} else {
-		LOG_ERR("ADC read failed");
-		return 0; // Return 0 on failure
-	}
-}
-
-/*static uint16_t read_adc_channel(uint8_t channel) {
-	sequence.channels = BIT(channel);
-	if (adc_read(adc_dev, &sequence) == 0) {
-		return adc_sample_buffer;
-	} else {
-		LOG_ERR("ADC read failed for channel %d", channel);
-		return 0; // Return 0 on failure
-	}
-}*/
+// ADC functions moved to hardware.c
 	
 static void adc_timer_handler(struct k_timer *timer)
 {
@@ -526,32 +486,7 @@ static void prepare_packet_header(uint8_t* packet){
 	packet[7] =  (DATAPACKET_SIZE - 8) / (num_channels * bytes_per_sample);
 }
 
-static void adc_setup(uint8_t channel)
-{
-	const struct adc_channel_cfg *ch_cfg;
-	if (channel == 0) {
-		static const struct adc_channel_cfg ch0_cfg = 
-			ADC_CHANNEL_CFG_DT(DT_CHILD(DT_NODELABEL(adc), channel_0));
-		ch_cfg = &ch0_cfg;
-	} else if (channel == 1) {
-		static const struct adc_channel_cfg ch1_cfg = 
-			ADC_CHANNEL_CFG_DT(DT_CHILD(DT_NODELABEL(adc), channel_1));
-		ch_cfg = &ch1_cfg;
-	} else {
-		LOG_ERR("Invalid channel %d", channel);
-		return;
-	}
-	int ret = adc_channel_setup(adc_dev, ch_cfg);
-	if (ret) {
-		LOG_ERR("ADC channel setup failed with error %d", ret);
-		return;
-	}
-	sequence.channels = BIT(channel);
-	sequence.buffer = &adc_sample_buffer;
-	sequence.buffer_size = sizeof(adc_sample_buffer);
-	sequence.resolution = ADC_RESOLUTION;
-	LOG_INF("ADC setup complete for channel %d", channel);
-}
+// adc_configure_channel() moved to hardware.c
 
 void adc_thread(void *p1, void *p2, void *p3) {
     while (is_measuring) {
@@ -636,19 +571,7 @@ static void stop_continuous_measurement_timer(void){
 	stop_timer_sampling();
 }
 
-static uint16_t read_adc_averaged(uint8_t n)
-{
-	int32_t sum = 0;
-	for (uint8_t i = 0; i < n; i++) {
-		if (adc_read(adc_dev, &sequence) == 0) {
-			sum += adc_sample_buffer;
-			LOG_DBG("Sample %d: %d, Running sum: %d", i, adc_sample_buffer, sum);
-		}
-	}
-	uint16_t average = (uint16_t)(sum / n);
-	LOG_INF("ADC Sum: %d, Samples: %d, Average: %d", sum, n, average);
-	return average;
-}
+// read_adc_averaged() moved to hardware.c
 
 static uint64_t get_timestamp(void)
 {
@@ -683,22 +606,10 @@ int my_pbm_init(void)
 	LOG_INF("PBM service initialization started");
 	memcpy(command_buffer, default_command, 16);
 	LOG_INF("Command buffer initialized with default command");
-	gpio_dev = DEVICE_DT_GET(DT_NODELABEL(gpio0));
-	gpio1_dev = DEVICE_DT_GET(DT_NODELABEL(gpio1));
-	if (gpio_dev) {
-		gpio_pin_configure(gpio_dev, MEASURE_PIN, GPIO_OUTPUT_ACTIVE);
-		gpio_pin_configure(gpio_dev, LED2_PIN, GPIO_OUTPUT_ACTIVE);
-		gpio_pin_set(gpio_dev, LED2_PIN, 0);
-	}
-	if (gpio1_dev) {
-		gpio_pin_configure(gpio1_dev, LED1_PIN, GPIO_OUTPUT_ACTIVE);
-		gpio_pin_set(gpio1_dev, LED1_PIN, 0);
-	}
-	//k_work_init(&adc_work,    adc_work_handler);
-	//k_work_init(&packet_work, packet_work_handler);
+	
+	// Initialize ring buffer
 	ring_buffer_reset();
-	adc_setup(SENSOR_PIN);
-	//k_timer_init(&adc_timer, adc_timer_handler, NULL);
+	
 	LOG_INF("Service has %d attributes", my_pbm_svc.attr_count);
 	for (int i = 0; i < my_pbm_svc.attr_count; i++) {
 		LOG_INF("Attr[%d]: UUID type %d, read=%p, write=%p", 
@@ -718,26 +629,19 @@ int my_pbm_send_sensor_notify(uint8_t *sensor_value)
 	return bt_gatt_notify(NULL, &my_pbm_svc.attrs[5], sensor_value, DATAPACKET_SIZE);
 }
 // -----------LED Control Functions--------------------
+// Wrapper functions that call hardware layer
 void set_led1(bool state) {
-	if (gpio1_dev) {
-		gpio_pin_set(gpio1_dev, LED1_PIN, state ? 1 : 0);
-	}
+	led1_set(state);
 }
 
 void set_led2(bool state) {
-	if (gpio_dev) {
-		gpio_pin_set(gpio_dev, LED2_PIN, state ? 1 : 0);
-	}
+	led2_set(state);
 }
 
 void toggle_led1(void) {
-	if (gpio1_dev) {
-		gpio_pin_toggle(gpio1_dev, LED1_PIN);
-	}
+	led1_toggle();
 }
 
 void toggle_led2(void) {
-	if (gpio_dev) {
-		gpio_pin_toggle(gpio_dev, LED2_PIN);
-	}
+	led2_toggle();
 }

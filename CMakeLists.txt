@@ -12,6 +12,7 @@ project(NONE)
 target_sources(app PRIVATE
   src/main.c
   src/my_pbm.c
+  src/hardware.c
 )
 
 # NORDIC SDK APP END

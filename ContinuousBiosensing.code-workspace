@@ -1,0 +1,19 @@
+{
+	"folders": [
+		{
+			"path": "C:/ContinuousBiosensingPCBs/boards/VRG/ContinuousBiosensing"
+		},
+		{
+			"name": "Firs",
+			"path": "C:/Firs"
+		},
+		{
+			"name": "blinky_1",
+			"path": "C:/blinky_1"
+		},
+		{
+			"name": "BLE_Electrochemistry_CB",
+			"path": "F:/BLE_Electrochemistry_CB"
+		}
+	]
+}

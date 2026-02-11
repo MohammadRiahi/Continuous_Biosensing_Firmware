@@ -1,0 +1,16 @@
+# Zephyr / nRF Connect 
+build/ 
+*.hex 
+*.elf 
+*.bin 
+*.map 
+*.log 
+ 
+# VS Code 
+.vscode/ 
+ 
+# Ninja 
+.ninja_log 
+ 
+# NRF Util 
+generated_nrfutil_batch.json 
