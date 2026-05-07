@@ -8,10 +8,6 @@
 	chosen {
 		zephyr,console = &cdc_acm_uart0;
 	};
-
-	zephyr,user {
-		enable-gpios = <&gpio0 14 GPIO_ACTIVE_HIGH>;
-	};
 };
 
 &zephyr_udc0 {

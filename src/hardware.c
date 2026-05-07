@@ -33,13 +33,13 @@ static const struct gpio_dt_spec led2 = GPIO_DT_SPEC_GET(LED2_NODE, gpios);
     #define HAS_MEASURE_PIN 0
 #endif
 
-// Enable pin (P0.14) — driven high on startup
-#if DT_NODE_EXISTS(DT_PATH(zephyr_user)) && DT_NODE_HAS_PROP(DT_PATH(zephyr_user), enable_gpios)
-    static const struct gpio_dt_spec enable_pin =
-        GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), enable_gpios);
-    #define HAS_ENABLE_PIN 1
+// Power_on pin (P0.14) — driven high on startup
+#if DT_NODE_EXISTS(DT_PATH(zephyr_user)) && DT_NODE_HAS_PROP(DT_PATH(zephyr_user), power_on_gpios)
+    static const struct gpio_dt_spec power_on_pin =
+        GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), power_on_gpios);
+    #define HAS_POWER_ON_PIN 1
 #else
-    #define HAS_ENABLE_PIN 0
+    #define HAS_POWER_ON_PIN 0
 #endif
 
 // =============================================================================
@@ -319,18 +319,18 @@ int hw_init_all(void) {
         return ret;
     }
 
-    // Drive P0.14 (enable pin) high on startup
-#if HAS_ENABLE_PIN
-    if (!gpio_is_ready_dt(&enable_pin)) {
-        LOG_ERR("Enable pin device not ready");
+    // Drive P0.14 (Power_on) high on startup
+#if HAS_POWER_ON_PIN
+    if (!gpio_is_ready_dt(&power_on_pin)) {
+        LOG_ERR("Power_on pin device not ready");
         return -ENODEV;
     }
-    ret = gpio_pin_configure_dt(&enable_pin, GPIO_OUTPUT_ACTIVE);
+    ret = gpio_pin_configure_dt(&power_on_pin, GPIO_OUTPUT_ACTIVE);
     if (ret < 0) {
-        LOG_ERR("Failed to configure enable pin: %d", ret);
+        LOG_ERR("Failed to configure Power_on pin: %d", ret);
         return ret;
     }
-    LOG_INF("Enable pin (P0.14) set high");
+    LOG_INF("Power_on pin (P0.14) set high");
 #endif
 
     LOG_INF("=== Hardware Initialization Complete ===");

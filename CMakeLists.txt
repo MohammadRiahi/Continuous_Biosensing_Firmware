@@ -5,6 +5,9 @@
 #
 cmake_minimum_required(VERSION 3.20.0)
 
+# Include project-level device tree additions (Power_on pin, etc.)
+set(DTS_EXTRA_FILES ${CMAKE_SOURCE_DIR}/ContinuousBiosensing.dts)
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(NONE)
 

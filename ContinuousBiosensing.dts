@@ -1,0 +1,11 @@
+/*
+ * ContinuousBiosensing project — custom device tree additions
+ *
+ * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+ */
+
+/ {
+	zephyr,user {
+		power-on-gpios = <&gpio0 14 GPIO_ACTIVE_HIGH>;
+	};
+};
