@@ -33,6 +33,15 @@ static const struct gpio_dt_spec led2 = GPIO_DT_SPEC_GET(LED2_NODE, gpios);
     #define HAS_MEASURE_PIN 0
 #endif
 
+// Enable pin (P0.14) — driven high on startup
+#if DT_NODE_EXISTS(DT_PATH(zephyr_user)) && DT_NODE_HAS_PROP(DT_PATH(zephyr_user), enable_gpios)
+    static const struct gpio_dt_spec enable_pin =
+        GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), enable_gpios);
+    #define HAS_ENABLE_PIN 1
+#else
+    #define HAS_ENABLE_PIN 0
+#endif
+
 // =============================================================================
 // ADC Configuration
 // =============================================================================
@@ -309,7 +318,21 @@ int hw_init_all(void) {
         LOG_ERR("ADC channel 0 configuration failed: %d", ret);
         return ret;
     }
-    
+
+    // Drive P0.14 (enable pin) high on startup
+#if HAS_ENABLE_PIN
+    if (!gpio_is_ready_dt(&enable_pin)) {
+        LOG_ERR("Enable pin device not ready");
+        return -ENODEV;
+    }
+    ret = gpio_pin_configure_dt(&enable_pin, GPIO_OUTPUT_ACTIVE);
+    if (ret < 0) {
+        LOG_ERR("Failed to configure enable pin: %d", ret);
+        return ret;
+    }
+    LOG_INF("Enable pin (P0.14) set high");
+#endif
+
     LOG_INF("=== Hardware Initialization Complete ===");
     LOG_INF("Logical CH0 = Physical ADC channel %d", adc_channel_ids[0]);
     LOG_INF("Logical CH1 = Physical ADC channel %d", adc_channel_ids[1]);
