@@ -6,6 +6,7 @@
 
 / {
 	zephyr,user {
-		power-on-gpios = <&gpio0 14 GPIO_ACTIVE_HIGH>;
+		//power-on-gpios = <&gpio0 14 GPIO_ACTIVE_HIGH>;
+		//io-channels = <&adc 2>, <&adc 7>;
 	};
 };

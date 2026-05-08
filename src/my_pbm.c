@@ -25,6 +25,7 @@
 #include "my_pbm.h"
 #include "my_pbm_service_table.h"
 #include "hardware.h"
+#include "dac8831.h"
 //-----------------------------Threads------------------------------------------------
 #define ADC_THREAD_STACK_SIZE 1024
 #define BLE_THREAD_STACK_SIZE 1024
@@ -351,6 +352,7 @@ static ssize_t write_commands(struct bt_conn *conn, const struct bt_gatt_attr *a
                 adc_thread, NULL, NULL, NULL, ADC_THREAD_PRIORITY, 0, K_NO_WAIT);
 			k_thread_create(&ble_thread_data, ble_thread_stack, BLE_THREAD_STACK_SIZE,
                 ble_thread, NULL, NULL, NULL, BLE_THREAD_PRIORITY, 0, K_NO_WAIT);
+			dac8831_set_voltage(+300.0f);      // output +300 mV
 			start_continuous_measurement_timer();
 			break;
 			
