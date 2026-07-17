@@ -184,14 +184,14 @@ int adc_init(void) {
     
     // Initialize channel configs from device tree
     // Channel 0 (physical channel 2, AIN2 = P0.04)
-    adc_channel_cfgs[0].gain = ADC_GAIN_1_6;
+    adc_channel_cfgs[0].gain = ADC_GAIN_1_3;
     adc_channel_cfgs[0].reference = ADC_REF_INTERNAL;
     adc_channel_cfgs[0].acquisition_time = ADC_ACQ_TIME_DEFAULT;
     adc_channel_cfgs[0].channel_id = adc_channel_ids[0];
     adc_channel_cfgs[0].input_positive = NRF_SAADC_AIN2;  /* P0.04 — must match DTS */
     
     // Channel 1 (physical channel 7, AIN7 = P0.31)
-    adc_channel_cfgs[1].gain = ADC_GAIN_1_6;
+    adc_channel_cfgs[1].gain = ADC_GAIN_1_3;
     adc_channel_cfgs[1].reference = ADC_REF_INTERNAL;
     adc_channel_cfgs[1].acquisition_time = ADC_ACQ_TIME_DEFAULT;
     adc_channel_cfgs[1].channel_id = adc_channel_ids[1];

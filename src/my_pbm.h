@@ -16,6 +16,20 @@ struct my_pbm_cb {
 	button_cb_t button_cb;
 };
 
+typedef struct{
+	int8_t e_ampl; // config_buffer[2] // make it signed for debug 
+	uint16_t e_base_raw; // config_buffer[3-4]
+	uint16_t e_end_raw; // config_buffer[5-6]
+	uint8_t period_f; // config_buffer[7]
+	uint8_t delta_e; // config_buffer[8]
+	uint8_t avg_num; // config_buffer[9]
+	uint16_t sampling_rate; // config_buffer[10-11]
+	uint8_t sign_byte; // config_buffer[12]
+} pbm_config_t;
+
+extern volatile pbm_config_t g_cfg;
+
+
 enum CommandType {
 	CMD_STOP_ALL = 0x00,
     CMD_BATTERY_CHECK = 0x01,
