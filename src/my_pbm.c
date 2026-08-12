@@ -23,10 +23,16 @@
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/storage/flash_map.h>
 #include <zephyr/fs/nvs.h>
+#include <zephyr/drivers/gpio.h>
 #include "my_pbm.h"
 #include "my_pbm_service_table.h"
 #include "hardware.h"
 #include "dac8831.h"
+#include <zephyr/debug/thread_analyzer.h>
+//----------------------------GPIO-----------------------------------------------
+#define APP_NODE DT_PATH(zephyr_user)
+static const struct gpio_dt_spec power_on = GPIO_DT_SPEC_GET(APP_NODE, power_on_gpios);
+static const struct gpio_dt_spec neg_LDO = GPIO_DT_SPEC_GET(APP_NODE, neg_ldo_gpios);
 //-----------------------------Threads------------------------------------------------
 #define ADC_THREAD_STACK_SIZE 			1024
 #define BLE_THREAD_STACK_SIZE 			1024
@@ -55,19 +61,29 @@ struct k_sem dac_adc_sem;
 void adc_thread(void *p1, void *p2, void *p3);
 void ble_thread(void *p1, void *p2, void *p3);
 void dac_update_thread(void *p1, void *p2, void *p3);
+static uint16_t decodeSampleRate(uint8_t code);
+//-----------------------------Program Report Function --------------------------------
+static int send_runtime_report(void)
+{
+	uint8_t payload[10];
+
+}
 
 //-----------------------------Configurations struct and helper functions for configuration update-----------------------------------------
 volatile pbm_config_t g_cfg;
 static struct k_mutex g_cfg_mutex;
 static void cfg_from_buffer(const uint8_t buf[16], pbm_config_t *cfg) {
-	cfg->e_ampl = buf[2];
-	cfg->e_base_raw = sys_get_le16(&buf[3]);
-	cfg->e_end_raw = sys_get_le16(&buf[5]);
-	cfg->period_f = buf[7];
-	cfg->delta_e = buf[8];
-	cfg->avg_num = buf[9];
-	cfg->sampling_rate = sys_get_le16(&buf[10]);
-	cfg->sign_byte = buf[12];
+	cfg->e_ampl_pos = sys_get_le16(&buf[2]);
+	cfg->e_ampl_neg = sys_get_le16(&buf[4]);
+	cfg->e_base = sys_get_le16(&buf[6]);
+	cfg->e_end = sys_get_le16(&buf[8]);
+	cfg->pulse_freq = buf[10];
+	cfg->pw = buf[11];
+	cfg->delta_e = buf[12];
+	cfg->avg_num = buf[13];
+	cfg->sampling_rate = buf[14];
+	cfg->sampling_rate_hz = decodeSampleRate(cfg->sampling_rate);
+	cfg->EC_mode = buf[15];
 }
 typedef enum {
     PULSE_PHASE_IDLE = 0,
@@ -79,6 +95,7 @@ static volatile pulse_phase_t pulse_phase = PULSE_PHASE_IDLE;
 static volatile uint8_t timer_counter;
 static volatile uint8_t pulse_cycle_count;
 
+/*		
 static bool e_base_is_signed(const pbm_config_t *cfg)
 {
     return (cfg->sign_byte == 1U) || (cfg->sign_byte == 3U);
@@ -86,10 +103,10 @@ static bool e_base_is_signed(const pbm_config_t *cfg)
 
 static bool e_end_is_signed(const pbm_config_t *cfg)
 {
-    return (cfg->sign_byte == 2U) || (cfg->sign_byte == 3U);
+    return (cfg->sign_byte `== 2U) || (cfg->sign_byte == 3U);
 }
 
-/* Return as int32_t so unsigned 0..65535 can still be represented safely */
+ Return as int32_t so unsigned 0..65535 can still be represented safely 
 static int32_t e_base_value(const pbm_config_t *cfg)
 {
 		//dac8831_set_voltage(-500.0); // debug; 
@@ -104,7 +121,7 @@ static int32_t e_end_value(const pbm_config_t *cfg)
          int32_t mag = (int32_t)cfg->e_end_raw;   // two's complement decode
 		 return e_end_is_signed(cfg) ? -mag : mag;
 }
-
+*/
 
 
 //-----------------------------Constants----------------------------------------------
@@ -128,9 +145,9 @@ volatile uint8_t averaging = 1; //Set by the user on the app
 volatile uint32_t samplingRate = 1000; // Hz
 
 /* Helper function to decode sample rate from code */
-static uint32_t decodeSampleRate(uint8_t code) {
+static uint16_t decodeSampleRate(uint8_t code) {
     switch (code) {
-        case 0: return 100;
+        case 0: return 100; //temp
         case 1: return 250;
         case 2: return 500;
         case 3: return 1000;
@@ -159,6 +176,8 @@ static bool cmd_nvs_ready;
 // Simple continuous measurement variables
 static bool is_measuring = false;
 
+//BLE Connection Local Variable storage for changing connection parameters
+static struct bt_conn *active_conn; 
 
 
 static void   adc_timer_handler(struct k_timer *timer);
@@ -181,7 +200,7 @@ LOG_MODULE_DECLARE(Lesson4_Exercise2);
 			 uint16_t len, uint16_t offset, uint8_t flags);
 static void stop_continuous_measurement_timer(void);
 static void start_continuous_measurement_timer(uint32_t hold_ms);
-static void start_timer_sampling(uint32_t frequency_hz, uint32_t hold_ms);
+static void start_timer_sampling(uint16_t frequency_hz, uint32_t hold_ms);
 
 // nvs functions 
 static int command_nvs_init(void)
@@ -245,7 +264,65 @@ static int command_nvs_save(const uint8_t *buf, size_t len)
     }
     return 0;
 }
+// functions for BLE connection handeling 
+void my_pbm_set_active_conn(struct bt_conn *conn)
+{
+    if (conn == NULL) {
+        return;
+    }
 
+    if (active_conn == conn) {
+        return;
+    }
+
+    if (active_conn) {
+        bt_conn_unref(active_conn);
+        active_conn = NULL;
+    }
+
+    active_conn = bt_conn_ref(conn);
+}
+void my_pbm_clear_active_conn(void)
+{
+    if (active_conn) {
+        bt_conn_unref(active_conn);
+        active_conn = NULL;
+    }
+}
+static int ble_conn_param_update(uint16_t int_min,uint16_t int_max,uint16_t latency,uint16_t timeout)
+{
+    if (active_conn == NULL) {
+        return -ENOTCONN;
+    }
+
+    struct bt_le_conn_param pref = {
+        .interval_min = int_min,
+        .interval_max = int_max,
+        .latency      = latency,
+        .timeout      = timeout,
+    };
+
+    int err = bt_conn_le_param_update(active_conn, &pref);
+    if (err) {
+        printk("Param update request failed (err %d)\n", err);
+    } else {
+        printk("Param update request sent: min=%u max=%u lat=%u to=%u\n",
+               int_min, int_max, latency, timeout);
+    }
+
+    return err;
+}
+int my_pbm_request_fast_conn_params(void)
+{
+    /* Faster / smoother streaming profile: 30-50 ms, no latency */
+    return ble_conn_param_update(24, 40, 0, 400);
+}
+
+int my_pbm_request_slow_conn_params(void)
+{
+    /* Low-power profile: 125-150 ms, latency 2 */
+    return ble_conn_param_update(100, 120, 2, 200);
+}
 
 static ssize_t write_heartbeat(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
 			 uint16_t len, uint16_t offset, uint8_t flags)
@@ -335,39 +412,61 @@ static ssize_t write_commands(struct bt_conn *conn, const struct bt_gatt_attr *a
 			
 		case CMD_BATTERY_CHECK:
 			LOG_INF("Command: BATTERY_CHECK");
+			#if defined(CONFIG_THREAD_ANALYZER)
+    		LOG_INF("Thread runtime report after STOP:");
+			k_sleep(K_MSEC(100));
+    		//thread_analyzer_print();
+			#endif
+			/*
 			// debug - want to observe the contents of config buffer which comes from command_buffer in ligh blue
 			uint8_t packet_debug[DATAPACKET_SIZE];
 			memset(packet_debug, 0, DATAPACKET_SIZE);
 			memcpy(packet_debug, config_buffer, 16);
+			pbm_config_t tmp2;
+			cfg_from_buffer(packet_debug, &tmp2);
+			//dac8831_set_voltage(tmp2.e_ampl); // for debugging
 			int err = my_pbm_send_sensor_notify(packet_debug);
 			// end of debug 
 			// Handle battery check command
+			*/
+			break;
+		case CMD_DEV_OFF:
+			LOG_INF("Command: DEV_OFF");
+			gpio_pin_set_dt(&power_on, 0); // Turn off the device
+			// Handle device off command
 			break;
 			
 		case CMD_READ_CONFIG:
 			LOG_INF("Command: READ_CONFIG");
 			// Update the second byte of config_buffer with the command type
 			/*
-			config_buffer[1] = CMD_READ_CONFIG;
+			config_buffer[1] = CMD_READ_CONFIG;i
 			samplingRate = decodeSampleRate(config_buffer[7]);  // Decode sampling rate
 			averaging = config_buffer[8];  // Set averaging parameter
 			*/
 			// Get current timestamp (using k_uptime_get_32() for milliseconds since boot)
-
+			//memcpy(config_buffer, command_buffer, 16); // overwrite config buffer with command buffer for now
 			uint32_t current_timestamp = k_uptime_get_32();
+			
 			snprintf(message_buffer, sizeof(message_buffer),
-				"{\"ts\":%u,\"Config read\":[%d,%d,%d,%d,%d,%d,%d,%d]}",
+				"{\"ts\":%u,\"Config read\":[%d,%d,%d,%d,%d,%d,%d,%d,%d]}",
 				current_timestamp,
-				g_cfg.e_ampl, g_cfg.e_base_raw, g_cfg.e_end_raw, g_cfg.period_f,
-				g_cfg.delta_e, g_cfg.avg_num, g_cfg.sampling_rate, g_cfg.sign_byte);	
+				g_cfg.e_ampl_pos, g_cfg.e_ampl_neg, g_cfg.e_base, g_cfg.e_end,
+				g_cfg.pulse_freq, g_cfg.pw, g_cfg.delta_e, g_cfg.avg_num, g_cfg.sampling_rate, g_cfg.EC_mode);
+				LOG_INF("JSON message created: %s", message_buffer);
+/*
+			snprintf(message_buffer, sizeof(message_buffer),
+				"{\"ts\":%u,\"Config read\":[%d,%d,%d,%d,%d,%d,%d,%d,%d]}",
+				current_timestamp,
+				1, 2, 3, 4,
+				5, 6, 7,8, 9);
 				LOG_INF("JSON message created: %s", message_buffer);
 
-			/*
-			 debug
-			config_buffer[2] = 1; config_buffer[3] = 2; config_buffer[4] = 3; config_buffer[7] = 4; 
+			/*config_buffer[2] = 1; config_buffer[3] = 2; config_buffer[4] = 3; config_buffer[7] = 4; 
 			config_buffer[8] = 5; config_buffer[9] = 6; config_buffer[10] = 7; config_buffer[11] = 8;
 			config_buffer[12] = 9;
-			// end debug */
+		*/
+			LOG_INF("JSON message created: %s", message_buffer);
 
 			// Use the static message buffer instead of declaring on stack
 			// Format JSON message similar to your C++ version
@@ -436,10 +535,10 @@ static ssize_t write_commands(struct bt_conn *conn, const struct bt_gatt_attr *a
 			command_nvs_save((const uint8_t *)&g_cfg, sizeof(g_cfg)); // save g_cfg to NVS (non-volatile storage)
 			current_timestamp = k_uptime_get_32();
 			snprintf(message_buffer, sizeof(message_buffer),
-				"{\"ts\":%u,\"Config read\":[%d,%d,%d,%d,%d,%d,%d,%d]}",
+				"{\"ts\":%u,\"Config read\":[%d,%d,%d,%d,%d,%d,%d,%d,%d]}",
 				current_timestamp,
-				g_cfg.e_ampl, g_cfg.e_base_raw, g_cfg.e_end_raw, g_cfg.period_f,
-				g_cfg.delta_e, g_cfg.avg_num, g_cfg.sampling_rate, g_cfg.sign_byte);	
+				g_cfg.e_ampl_pos, g_cfg.e_ampl_neg, g_cfg.e_base, g_cfg.e_end,
+				g_cfg.pulse_freq, g_cfg.pw, g_cfg.delta_e, g_cfg.avg_num, g_cfg.sampling_rate, g_cfg.EC_mode);
 				LOG_INF("JSON message created: %s", message_buffer);
 
 			/*
@@ -541,7 +640,11 @@ static ssize_t write_commands(struct bt_conn *conn, const struct bt_gatt_attr *a
 				LOG_WRN("Already measuring");
 				break;
 			}
-
+			int perr = my_pbm_request_fast_conn_params();
+			if (perr && perr != -ENOTCONN) {
+    		LOG_WRN("Fast conn param request failed: %d", perr);
+			}
+			gpio_pin_set_dt(&neg_LDO, 1); // Turn on the -1.8 V LDO
 			const uint32_t hold_ms = 3000U;
 
 			k_mutex_init(&ring_buffer_mutex);
@@ -552,18 +655,18 @@ static ssize_t write_commands(struct bt_conn *conn, const struct bt_gatt_attr *a
 			local_cfg = g_cfg;
 			k_mutex_unlock(&g_cfg_mutex);
 
-			/* 1) Force DAC to e_base immediately */
-			dac8831_set_voltage((float)e_base_value(&local_cfg));
+			/*Force DAC to e_base immediately */
+			//dac8831_set_voltage((float)e_base_value(&local_cfg));
+			dac8831_set_voltage((float)local_cfg.e_base);
 
-			/* 2) Reset sweep state before anything starts */
+			/* Reset sweep state before anything starts */
 			timer_counter = 0;
 			pulse_cycle_count = 1;         /* first cycle uses base + 0*delta */
 			pulse_phase = PULSE_PHASE_IDLE;
 
-			/* 3) Mark running before thread create so loops do not exit early */
-			//is_measuring = true;
+			/*Mark running before thread create so loops do not exit early */
 
-			/* 4) Create worker threads */
+			/*Create worker threads */
 			k_thread_create(&adc_thread_data, adc_thread_stack, ADC_THREAD_STACK_SIZE,
 							adc_thread, NULL, NULL, NULL, ADC_THREAD_PRIORITY, 0, K_NO_WAIT);
 
@@ -573,7 +676,7 @@ static ssize_t write_commands(struct bt_conn *conn, const struct bt_gatt_attr *a
 			k_thread_create(&dac_update_thread_data, dac_update_thread_stack, DAC_UPDATE_THREAD_STACK_SIZE,
 							dac_update_thread, NULL, NULL, NULL, DAC_UPDATE_THREAD_PRIORITY, 0, K_NO_WAIT);
 
-			/* 5) Start timer with initial hold delay, then periodic sampling */
+			/*Start timer with initial hold delay, then periodic sampling */
 			start_continuous_measurement_timer(hold_ms);
 			break;			
 			
@@ -648,7 +751,7 @@ static void adc_timer_handler(struct k_timer *timer)
 {
     ARG_UNUSED(timer);
 
-    uint8_t period_in_counts = g_cfg.sampling_rate / g_cfg.period_f;
+    uint8_t period_in_counts = g_cfg.sampling_rate_hz / g_cfg.pulse_freq;
 
     if (timer_counter == 0) {
         pulse_phase = PULSE_PHASE_START;
@@ -785,25 +888,23 @@ void dac_update_thread(void *p1, void *p2, void *p3) { //needs to be updated
         local_cfg = g_cfg;
         k_mutex_unlock(&g_cfg_mutex);
 
-        float current_base =
-            (float)e_base_value(&local_cfg) +
-            local_cfg.delta_e * (pulse_cycle_count - 1);
+        float current_base = (float)local_cfg.e_base +  local_cfg.delta_e * (pulse_cycle_count - 1);
 
-        if (current_base >= (float)e_end_value(&local_cfg)) {
+        if (current_base >= (float)local_cfg.e_end) {
             is_measuring = false;
             stop_continuous_measurement_timer();
             break;
         }
 
         if (pulse_phase == PULSE_PHASE_START) {
-            dac8831_set_voltage(current_base + local_cfg.e_ampl);
+            dac8831_set_voltage(current_base + local_cfg.e_ampl_pos);
         } else if (pulse_phase == PULSE_PHASE_MID) {
-            dac8831_set_voltage(current_base - local_cfg.e_ampl);
+            dac8831_set_voltage(current_base + local_cfg.e_ampl_neg);
         }
     }
 }
 
-static void start_timer_sampling(uint32_t frequency_hz, uint32_t hold_ms){
+static void start_timer_sampling(uint16_t frequency_hz, uint32_t hold_ms){
 	ring_buffer_reset();
 	uint32_t period_us  = 1000000 / frequency_hz;
 	k_timer_start(&adc_timer,K_MSEC(hold_ms),K_USEC(period_us));
@@ -820,6 +921,7 @@ static void stop_timer_sampling(void){
 	k_sem_give(&adc_sample_sem);
 	k_sem_give(&data_ready_sem);
 	k_sem_give(&dac_update_sem);
+	pulse_phase = PULSE_PHASE_IDLE;
 	
 	ring_buffer_reset();
 	LOG_INF("Stopped timer sampling");
@@ -831,19 +933,24 @@ static void start_continuous_measurement_timer(uint32_t hold_ms){
 		LOG_WRN("Already measuring");
 		return;
 	}
-	LOG_INF("Starting timer-based measurement at %d Hz", g_cfg.sampling_rate);
+	LOG_INF("Starting timer-based measurement at %d Hz", g_cfg.sampling_rate_hz);
 	k_sem_init(&adc_sample_sem, 0, 1);
 	k_sem_init(&dac_update_sem, 0, 1);
 	k_sem_init(&dac_adc_sem,0,1);
 	k_timer_init(&adc_timer, adc_timer_handler, NULL);
 	//k_timer_start(&adc_timer, K_MSEC(1), K_MSEC(1));
 	//start_timer_sampling(samplingRate);
-	start_timer_sampling(g_cfg.sampling_rate, hold_ms);
+	start_timer_sampling(g_cfg.sampling_rate_hz, hold_ms);
 }
 
 static void stop_continuous_measurement_timer(void){
 	LOG_INF("Stopping timer-based measurement");
 	stop_timer_sampling();
+	gpio_pin_set_dt(&neg_LDO, 0); // Turn off the -1.8 V LDO
+	int perr = my_pbm_request_slow_conn_params();
+	if (perr && perr != -ENOTCONN) {
+    LOG_WRN("Slow conn param request failed: %d", perr);
+	}
 }
 
 // read_adc_averaged() moved to hardware.c
@@ -879,13 +986,16 @@ BT_GATT_SERVICE_DEFINE(
 int my_pbm_init(void)
 {
     int err;
-
+	
     LOG_INF("PBM service initialization started");
  	k_mutex_init(&g_cfg_mutex);
 	pbm_config_t tmp;
-
+	if (!gpio_is_ready_dt(&power_on)) {
+		LOG_ERR("power_on GPIO not ready");
+		return -ENODEV;
+	}
 	err = command_nvs_init();
-    if (!err && !command_nvs_load((uint8_t *)&tmp, 14)) { // instead of 14 i used to have sizeof(tmp)
+    if (!err && !command_nvs_load((uint8_t *)&tmp, sizeof(tmp))) { // instead of 14 i used to have sizeof(tmp)
         LOG_INF("Command buffer restored from NVS");
 		k_mutex_lock(&g_cfg_mutex, K_FOREVER);
 		g_cfg = tmp;

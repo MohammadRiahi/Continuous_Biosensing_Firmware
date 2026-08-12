@@ -2,6 +2,7 @@
 #define MY_PBM_H
 
 #include <zephyr/types.h>
+#include <zephyr/bluetooth/conn.h>
 
 
 /** @brief Callback type for when an LED state change is received. */
@@ -17,14 +18,17 @@ struct my_pbm_cb {
 };
 
 typedef struct{
-	int8_t e_ampl; // config_buffer[2] // make it signed for debug 
-	uint16_t e_base_raw; // config_buffer[3-4]
-	uint16_t e_end_raw; // config_buffer[5-6]
-	uint8_t period_f; // config_buffer[7]
-	uint8_t delta_e; // config_buffer[8]
-	uint8_t avg_num; // config_buffer[9]
-	uint16_t sampling_rate; // config_buffer[10-11]
-	uint8_t sign_byte; // config_buffer[12]
+	int16_t e_ampl_pos;		    // config_buffer[2-3] // make it signed for debug 
+	int16_t e_ampl_neg; 		// config_buffer[4-5]
+	int16_t e_base;			    // config_buffer[6-7]
+	int16_t e_end; 				// config_buffer[8-9]
+	uint8_t pulse_freq; 		// config_buffer[10]
+	uint8_t pw; 				// config_buffer[11]
+	uint8_t delta_e; 			// config_buffer[12]
+	uint8_t avg_num; 			// config_buffer[13]
+	uint8_t sampling_rate; 		// config_buffer[14]
+	uint16_t sampling_rate_hz;
+	uint8_t EC_mode; 			// config_buffer[15]
 } pbm_config_t;
 
 extern volatile pbm_config_t g_cfg;
@@ -35,6 +39,7 @@ enum CommandType {
     CMD_BATTERY_CHECK = 0x01,
     CMD_READ_CONFIG = 0x04,
     CMD_SET_CONFIG = 0x05,
+	CMD_DEV_OFF = 0x07,
 	CMD_START_SINGLE = 0x11,
     CMD_START_CONTINUOUS = 0x12,
 	CMD_STOP_MEASUREMENT = 0x13,
@@ -46,5 +51,12 @@ int my_pbm_init(void);
 int my_pbm_send_button_state_indicate(bool button_state);
 int my_pbm_send_button_state_notify(bool button_state);
 int my_pbm_send_sensor_notify(uint8_t *sensor_value);
+
+void my_pbm_set_active_conn(struct bt_conn *conn);
+void my_pbm_clear_active_conn(void);
+
+int my_pbm_request_fast_conn_params(void);
+int my_pbm_request_slow_conn_params(void);
+
 
 #endif // MY_PBM_H

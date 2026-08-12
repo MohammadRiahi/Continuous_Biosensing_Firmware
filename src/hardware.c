@@ -43,6 +43,13 @@ static const struct gpio_dt_spec led2 = GPIO_DT_SPEC_GET(LED2_NODE, gpios);
 #else
     #define HAS_POWER_ON_PIN 0
 #endif
+// Neg_LDO pin (P1.0) — driven low on startup
+#if DT_NODE_EXISTS(DT_PATH(zephyr_user)) && DT_NODE_HAS_PROP(DT_PATH(zephyr_user), neg_ldo_gpios)
+    static const struct gpio_dt_spec neg_ldo_pin = GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), neg_ldo_gpios);
+    #define HAS_NEG_LDO_PIN 1
+#else
+    #define HAS_NEG_LDO_PIN 0
+#endif
 
 // =============================================================================
 // ADC Configuration
@@ -336,6 +343,20 @@ int hw_init_all(void) {
     }
     LOG_INF("Power_on pin (P0.14) set high");
 #endif
+#if HAS_NEG_LDO_PIN
+    if (!gpio_is_ready_dt(&neg_ldo_pin)) {
+        LOG_ERR("Neg_LDO pin device not ready");
+        return -ENODEV;
+    }
+    ret = gpio_pin_configure_dt(&neg_ldo_pin, GPIO_OUTPUT_INACTIVE);
+    if (ret < 0) {
+        LOG_ERR("Failed to configure Neg_LDO pin: %d", ret);
+        return ret;
+    }
+    LOG_INF("Neg_LDO pin (1.0) set low");
+#endif
+
+
     dac8831_init();                    // sets DAC output to 0V (0x8000) and initialized it. 
 
     LOG_INF("=== Hardware Initialization Complete ===");
