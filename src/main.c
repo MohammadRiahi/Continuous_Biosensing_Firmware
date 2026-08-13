@@ -77,13 +77,13 @@ static const struct bt_data sd[] = {
 static void adv_work_handler(struct k_work *work)
 {
 	int err = bt_le_adv_start(adv_param, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
-	k_timer_init(&adv_led_timer, adv_led_timer_handler, NULL);
-	k_timer_start(&adv_led_timer, K_NO_WAIT, K_MSEC(RUN_LED_BLINK_INTERVAL));
 
 	if (err) {
 		printk("Advertising failed to start (err %d)\n", err);
 		return;
 	}
+
+	k_timer_start(&adv_led_timer, K_NO_WAIT, K_MSEC(RUN_LED_BLINK_INTERVAL));
 
 	printk("Advertising successfully started\n");
 }
@@ -108,18 +108,20 @@ static void on_connected(struct bt_conn *conn, uint8_t err)
    
 
     is_ble_connected = true;
+	k_timer_stop(&adv_led_timer);
     set_led1(false);
     set_led2(false);
 }
 
 static void on_disconnected(struct bt_conn *conn, uint8_t reason)
 {
-	//printk("Disconnected (reason %u)\n", reason);
+	printk("Disconnected (reason %u)\n", reason);
 
 	is_ble_connected = false;
-	set_led2(false); // Turn off LED1 (P0.24) when disconnected
-	my_pbm_clear_active_conn();
+	set_led1(false);
 	k_timer_start(&adv_led_timer, K_NO_WAIT, K_MSEC(RUN_LED_BLINK_INTERVAL));
+	set_led2(false);
+	my_pbm_clear_active_conn();
 	/* Restart advertising after disconnection */
 	advertising_start();
 }
@@ -137,6 +139,7 @@ int main(void)
 	int err;
 
 	LOG_INF("Starting Lesson 4 - Exercise 2 \n");
+	k_timer_init(&adv_led_timer, adv_led_timer_handler, NULL);
 
 
 	err = bt_enable(NULL);
