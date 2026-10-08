@@ -645,7 +645,7 @@ static ssize_t write_commands(struct bt_conn *conn, const struct bt_gatt_attr *a
     		LOG_WRN("Fast conn param request failed: %d", perr);
 			}
 			gpio_pin_set_dt(&neg_LDO, 1); // Turn on the -1.8 V LDO
-			const uint32_t hold_ms = 3000U;
+			const uint32_t hold_ms = 5000U;
 
 			k_mutex_init(&ring_buffer_mutex);
 			k_sem_init(&data_ready_sem, 0, 1);
