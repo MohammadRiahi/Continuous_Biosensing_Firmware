@@ -1,0 +1,10 @@
+/*
+ * ContinuousBiosensing project — custom device tree additions
+ *
+ * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+ */
+
+/ {
+	zephyr,user {
+	};
+};

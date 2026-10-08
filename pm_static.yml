@@ -1,0 +1,4 @@
+nvs_storage:
+  address: 0xF8000
+  size: 0x8000
+  region: flash_primary
