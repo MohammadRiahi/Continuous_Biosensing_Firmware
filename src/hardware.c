@@ -8,7 +8,9 @@
 #include <zephyr/drivers/adc.h>
 #include <zephyr/device.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/dt-bindings/adc/nrf-saadc.h>
 #include <errno.h>
+#include "dac8831.h"
 
 LOG_MODULE_REGISTER(hardware, LOG_LEVEL_INF);
 
@@ -31,6 +33,22 @@ static const struct gpio_dt_spec led2 = GPIO_DT_SPEC_GET(LED2_NODE, gpios);
     #define HAS_MEASURE_PIN 1
 #else
     #define HAS_MEASURE_PIN 0
+#endif
+
+// Power_on pin (P0.14) — driven high on startup
+#if DT_NODE_EXISTS(DT_PATH(zephyr_user)) && DT_NODE_HAS_PROP(DT_PATH(zephyr_user), power_on_gpios)
+    static const struct gpio_dt_spec power_on_pin =
+        GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), power_on_gpios);
+    #define HAS_POWER_ON_PIN 1
+#else
+    #define HAS_POWER_ON_PIN 0
+#endif
+// Neg_LDO pin (P1.0) — driven low on startup
+#if DT_NODE_EXISTS(DT_PATH(zephyr_user)) && DT_NODE_HAS_PROP(DT_PATH(zephyr_user), neg_ldo_gpios)
+    static const struct gpio_dt_spec neg_ldo_pin = GPIO_DT_SPEC_GET(DT_PATH(zephyr_user), neg_ldo_gpios);
+    #define HAS_NEG_LDO_PIN 1
+#else
+    #define HAS_NEG_LDO_PIN 0
 #endif
 
 // =============================================================================
@@ -172,17 +190,19 @@ int adc_init(void) {
     }
     
     // Initialize channel configs from device tree
-    // Channel 0 (physical channel 2)
-    adc_channel_cfgs[0].gain = ADC_GAIN_1_6;
+    // Channel 0 (physical channel 2, AIN2 = P0.04)
+    adc_channel_cfgs[0].gain = ADC_GAIN_1_3;
     adc_channel_cfgs[0].reference = ADC_REF_INTERNAL;
     adc_channel_cfgs[0].acquisition_time = ADC_ACQ_TIME_DEFAULT;
     adc_channel_cfgs[0].channel_id = adc_channel_ids[0];
+    adc_channel_cfgs[0].input_positive = NRF_SAADC_AIN2;  /* P0.04 — must match DTS */
     
-    // Channel 1 (physical channel 7)
-    adc_channel_cfgs[1].gain = ADC_GAIN_1_6;
+    // Channel 1 (physical channel 7, AIN7 = P0.31)
+    adc_channel_cfgs[1].gain = ADC_GAIN_1_3;
     adc_channel_cfgs[1].reference = ADC_REF_INTERNAL;
     adc_channel_cfgs[1].acquisition_time = ADC_ACQ_TIME_DEFAULT;
     adc_channel_cfgs[1].channel_id = adc_channel_ids[1];
+    adc_channel_cfgs[1].input_positive = NRF_SAADC_AIN7;  /* P0.31 — must match DTS */
     
     LOG_INF("ADC device initialized");
     return 0;
@@ -309,7 +329,36 @@ int hw_init_all(void) {
         LOG_ERR("ADC channel 0 configuration failed: %d", ret);
         return ret;
     }
-    
+
+    // Drive P0.14 (Power_on) high on startup
+#if HAS_POWER_ON_PIN
+    if (!gpio_is_ready_dt(&power_on_pin)) {
+        LOG_ERR("Power_on pin device not ready");
+        return -ENODEV;
+    }
+    ret = gpio_pin_configure_dt(&power_on_pin, GPIO_OUTPUT_ACTIVE);
+    if (ret < 0) {
+        LOG_ERR("Failed to configure Power_on pin: %d", ret);
+        return ret;
+    }
+    LOG_INF("Power_on pin (P0.14) set high");
+#endif
+#if HAS_NEG_LDO_PIN
+    if (!gpio_is_ready_dt(&neg_ldo_pin)) {
+        LOG_ERR("Neg_LDO pin device not ready");
+        return -ENODEV;
+    }
+    ret = gpio_pin_configure_dt(&neg_ldo_pin, GPIO_OUTPUT_INACTIVE);
+    if (ret < 0) {
+        LOG_ERR("Failed to configure Neg_LDO pin: %d", ret);
+        return ret;
+    }
+    LOG_INF("Neg_LDO pin (1.0) set low");
+#endif
+
+
+    dac8831_init();                    // sets DAC output to 0V (0x8000) and initialized it. 
+
     LOG_INF("=== Hardware Initialization Complete ===");
     LOG_INF("Logical CH0 = Physical ADC channel %d", adc_channel_ids[0]);
     LOG_INF("Logical CH1 = Physical ADC channel %d", adc_channel_ids[1]);
