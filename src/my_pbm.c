@@ -92,8 +92,8 @@ typedef enum {
 } pulse_phase_t;
 
 static volatile pulse_phase_t pulse_phase = PULSE_PHASE_IDLE;
-static volatile uint8_t timer_counter;
-static volatile uint8_t pulse_cycle_count;
+static volatile uint16_t timer_counter;
+static volatile uint16_t pulse_cycle_count;
 
 /*		
 static bool e_base_is_signed(const pbm_config_t *cfg)
